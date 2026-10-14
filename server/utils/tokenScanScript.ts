@@ -12,21 +12,96 @@
  *
  * ⚠️ 源码必须**纯 ASCII**（本机 PS 5.1 读无 BOM 文件按系统 ANSI 解码，见 ERROR.md E14）——
  *    因此"龙猫"二字用 `[char]0x9F99 + [char]0x732B` 拼出来，而不是字面量。
+ *    🔴 这条规则**在 2026-10-14 被实测打脸过一次**：模板里漏了一行中文注释（17 个 CJK 字符），
+ *    于是运行期写盘的 .ps1 根本不是纯 ASCII（当时只是"站在坑边"、还没踩响，见 ERROR.md E80）。
+ *    现在有单测 `tests/mp/tokenScanLaunch.test.ts` 直接对 `TOKEN_SCAN_PS1` 断言纯 ASCII。
+ *
+ * 🆕 2026-10-14（E80 轮，起因：有用户在 Windows 26H2 上报"扫描器未回传结果（退出码 4294967295）"）：
+ *   ① **加 `trap`：任何未捕获错误都先把失败原因回传**，不再让界面只看到一个冷冰冰的退出码；
+ *   ② **`$script:TotoroPhase` 记录"死在哪一步"**，随载荷一起回传（start/compile/enumerate/scan/post）；
+ *   ③ **参数名 `-Endpoint` → `-CallbackUrl`**：⚠️ 注意口径 —— 这**不是**因为"`-Endpoint` 会被 PowerShell 吃掉"
+ *      （官方开关表里从来没有它，`-File` 之后的一切参数都归脚本，本机实测也一直是通的）；
+ *      纯粹是**零成本避嫌**：万一将来 `powershell.exe` 换了内核、多了同名宿主开关，这个名字更不容易撞。
+ *   ④ **把 `[Console]::OutputEncoding` 固定成 UTF-8**：否则中文错误信息在 GBK 控制台下会写成乱码，
+ *      抓回来也读不懂（`tokenScanRunner.ts` 另有一层 GBK 兜底解码）。
  */
 
 /* ⚠️ 2026-09-19 删除**零引用**的 `TOKEN_SCAN_TIMEOUT_MS`：真实超时由
    `tokenScanRunner.ts` 的轮询间隔与 PS 脚本内的 `-TimeoutSec` 决定，这个常量从未被读取。 */
 
+/**
+ * 🔒 启动扫描器的**参数表唯一出口**（顺序在单测里钉死）。
+ *
+ * ⚠️ `-NonInteractive` **必须在 `-File` 之前**：`-File` 之后的一切都被宿主当成"脚本自己的参数"，
+ *    放到后面会让脚本收到一个它不认识的参数而**当场报错退出**（2026-10-14 实测）。
+ * ⚠️ 位置参数（脚本路径、回传地址、nonce）也必须守在 `-File` 之后，这是宿主文档规定的语义：
+ *    "File must be the last parameter in the command… all values typed after the File parameter
+ *     are interpreted as the script filepath and parameters passed to that script."
+ */
+export function tokenScannerArgs(script: string, callbackUrl: string, nonce: string): string[] {
+  return [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    script,
+    '-CallbackUrl',
+    callbackUrl,
+    '-Nonce',
+    nonce,
+  ]
+}
+
 export const TOKEN_SCAN_PS1 = `param(
-  [Parameter(Mandatory=$true)][string]$Endpoint,
+  [Parameter(Mandatory=$true)][string]$CallbackUrl,
   [Parameter(Mandatory=$true)][string]$Nonce,
   [int]$Max = 12,
   [string]$TitleNeedle = ''
 )
 $ErrorActionPreference = 'Stop'
 
-# "龙猫" 的 ASCII-only 写法（避免无 BOM 中文被 PS 5.1 按 ANSI 误解码）
+# "long mao" (totoro) written as char codes on purpose: a BOM-less .ps1 is decoded as
+# the system ANSI codepage by PS 5.1, so THIS FILE MUST STAY PURE ASCII (ERROR.md E14/E80).
 if ([string]::IsNullOrEmpty($TitleNeedle)) { $TitleNeedle = -join ([char]0x9F99, [char]0x732B) }
+
+# Keep console output UTF-8 so Chinese error text survives the pipe back to Node
+# (tokenScanRunner also has a GBK fallback for the case where we die before this line).
+# The catch below is intentionally silent: this is cosmetic, scanning must not depend on it.
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {
+  # best effort only: we still scan, the caller just decodes the text as ANSI instead
+}
+
+$script:TotoroPhase = 'start'
+
+# Report any uncaught failure back BEFORE exiting: otherwise the UI only ever sees a bare
+# exit code and nobody can tell "parameter rejected" from "blocked" from "killed" (ERROR.md E80).
+trap {
+  $detail = ''
+  try {
+    $detail = [string]$_.Exception.Message
+    if ($_.InvocationInfo -and $_.InvocationInfo.ScriptLineNumber) {
+      $detail = ('line ' + $_.InvocationInfo.ScriptLineNumber + ': ' + $detail)
+    }
+  } catch {
+    # best effort: $detail is a nice-to-have, never let its failure replace the real error
+  }
+  try {
+    $fail = @{
+      nonce = $Nonce
+      tokens = @()
+      error = 'SCRIPT_FAILED'
+      processes = -1
+      phase = [string]$script:TotoroPhase
+      detail = $detail
+      psVersion = $PSVersionTable.PSVersion.ToString()
+    } | ConvertTo-Json -Depth 3 -Compress
+    Invoke-RestMethod -Method Post -Uri $CallbackUrl -ContentType 'application/json' -Body ([System.Text.Encoding]::UTF8.GetBytes($fail)) -TimeoutSec 10 | Out-Null
+  } catch {
+    # best effort: the callback endpoint itself is unreachable - the runner still records our stdout
+  }
+  exit 1
+}
 
 $cs = @'
 using System;
@@ -125,8 +200,10 @@ public static class TotoroMemScan {
 }
 '@
 
+$script:TotoroPhase = 'compile'
 Add-Type -TypeDefinition $cs -Language CSharp | Out-Null
 
+$script:TotoroPhase = 'enumerate'
 $procs = @(Get-Process -Name 'WeChatAppEx' -ErrorAction SilentlyContinue | Where-Object { $_ -ne $null })
 $tokens = New-Object System.Collections.Generic.List[string]
 $scanError = ''
@@ -134,6 +211,7 @@ $scanError = ''
 if ($procs.Count -eq 0) {
   $scanError = 'NO_PROCESS'
 } else {
+  $script:TotoroPhase = 'scan'
   $withTitle = @($procs | Where-Object { $_.MainWindowTitle -like ('*' + $TitleNeedle + '*') })
   $without = @($procs | Where-Object { -not ($_.MainWindowTitle -like ('*' + $TitleNeedle + '*')) })
   $ordered = @($withTitle) + @($without)
@@ -156,11 +234,14 @@ $payload = @{
   tokens = @($tokens)
   error = $scanError
   processes = $procs.Count
+  phase = [string]$script:TotoroPhase
+  psVersion = $PSVersionTable.PSVersion.ToString()
 } | ConvertTo-Json -Depth 3 -Compress
 
+$script:TotoroPhase = 'post'
 $bytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
 try {
-  Invoke-RestMethod -Method Post -Uri $Endpoint -ContentType 'application/json' -Body $bytes -TimeoutSec 30 | Out-Null
+  Invoke-RestMethod -Method Post -Uri $CallbackUrl -ContentType 'application/json' -Body $bytes -TimeoutSec 30 | Out-Null
 } catch {
   Write-Host ('POST failed: ' + $_.Exception.Message)
   exit 1

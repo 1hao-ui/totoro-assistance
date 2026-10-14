@@ -46,6 +46,10 @@ export default defineEventHandler(async (event) => {
     tokens?: unknown
     error?: string
     processes?: number
+    /** 🆕 2026-10-14（E80）：脚本 `trap` 自报的"死在哪一步 / 原话 / PS 版本"，让失败不再是光秃秃一个退出码 */
+    phase?: string
+    detail?: string
+    psVersion?: string
   }
 
   const st = getScan()
@@ -59,14 +63,28 @@ export default defineEventHandler(async (event) => {
   patchScan({ candidates: candidates.length })
 
   if (!candidates.length) {
+    /**
+     * 🆕 2026-10-14（E80）：脚本 `trap` 自报的失败原话 —— **比任何猜测都值钱**，直接摆给用户。
+     * 老实现只给一句"可能被杀软拦截"（无依据）；而某个补丁版又反过来断言"是 `-Endpoint` 的锅"
+     * （同样无依据，本机实测也否掉了）。现在改成：**脚本自己说什么就转什么**。
+     */
+    const detail = typeof body?.detail === 'string' ? body.detail.trim().slice(0, 400) : ''
     const hint =
-      body?.error === 'NO_PROCESS'
+      body?.error === 'SCRIPT_FAILED'
+        ? `扫描脚本自己报错了（死在「${body?.phase || '未知'}」这一步）：${detail || '（脚本没给出细节）'}`
+        : body?.error === 'NO_PROCESS'
         ? '未找到微信小程序进程：请先用「电脑版微信」打开并登录「龙猫体育锻炼」，保持小程序窗口开着，再点一次「一键获取 token」'
         : body?.error === 'NO_TOKEN'
           ? '进程里没找到 token：请在小程序里点开任意页面（触发一次请求）后重试；「务必保持小程序窗口开着」（关掉后内存里就没有新 token 了）'
           : '扫描器没有回传可用候选（可能被杀软拦截或微信版本不兼容）——可改用 Fiddler 抓包粘贴 token'
     patchScan({ phase: 'error', message: hint })
-    logWarn('token', '扫描未拿到候选', { scannerError: body?.error ?? '(无)', processes: body?.processes })
+    logWarn('token', '扫描未拿到候选', {
+      scannerError: body?.error ?? '(无)',
+      phase: body?.phase ?? '',
+      detail: detail.slice(0, 200), // 值级脱敏由 logFormat 负责（形似 token 的片段会被掩掉）
+      psVersion: body?.psVersion ?? '',
+      processes: body?.processes,
+    })
     return { ok: true, validated: 0 }
   }
 
