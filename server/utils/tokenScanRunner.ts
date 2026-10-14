@@ -18,6 +18,7 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { redactFreeText } from '../../utils/mp/logFormat'
 import { logInfo, logWarn } from './logger'
 import { TOKEN_SCAN_PS1, tokenScannerArgs } from './tokenScanScript'
 import { getScan, patchScan } from './tokenScanState'
@@ -97,8 +98,27 @@ export function describeScanFailure(code: number | null, output: string, logPath
 }
 
 /**
+ * 把扫描器现场文本**脱敏后再留档**（写入 sidecar 与进包前都跑它；幂等）。
+ *
+ * 🔴 为什么需要（2026-10-14 自查发现的漏洞）：上一版 `writeScannerLog()` 是**原样写盘**的 ——
+ *    子进程输出里若出现 token 样式串或学号，就会以明文躺在 `%TEMP%` 里、还会随诊断包发出去。
+ *    现在统一过 `redactFreeText()`（token 样式串 + 自述人名 + 8~18 位数字串）。
+ *
+ * ⚠️ **唯一豁免：`exitCode:` 那一行**。退出码本身是 10 位数字（`4294967295`），
+ *    数字串掩码会把它变成 `42****95` —— 而**这个数正是 E80 那次报障里唯一的线索**，
+ *    掩掉它等于把证据毁了。这一行由本文件自己写、不含任何用户数据，所以按行豁免；
+ *    其余每一行（包括子进程原话）都照常掩码。
+ */
+export function maskScannerRecord(text: string): string {
+  return String(text ?? '')
+    .split('\n')
+    .map((line) => (/^exitCode\s*:/.test(line) ? line : redactFreeText(line)))
+    .join('\n')
+}
+
+/**
  * 把这次扫描的现场写成 sidecar 文件（**尽力而为**，失败不影响业务）。
- * ⚠️ 不写 nonce（一次性凭据，没必要落盘）。
+ * ⚠️ 不写 nonce（一次性凭据，没必要落盘）；写盘前过 `maskScannerRecord()` 脱敏。
  */
 function writeScannerLog(code: number | null, output: string): string {
   const p = scannerLogPath()
@@ -112,7 +132,7 @@ function writeScannerLog(code: number | null, output: string): string {
       shown || '(子进程没有留下任何输出)',
       '',
     ].join('\n')
-    writeFileSync(p, body, 'utf8')
+    writeFileSync(p, maskScannerRecord(body), 'utf8')
   } catch {
     /* 留档失败不影响业务 */
   }
@@ -155,25 +175,42 @@ export function launchTokenScanner(endpoint: string, nonce: string): void {
   })
 
   child.on('exit', (code) => {
-    const raw = Buffer.concat(chunks)
-    const output = decodeScannerOutput(raw)
+    const output = decodeScannerOutput(Buffer.concat(chunks))
     const logPath = writeScannerLog(code, output)
     const text = condenseScanOutput(output)
+    /** 🆕 脱敏后的现场文本：**界面文案、日志行、诊断包都用它**（退出码那一行豁免掩码） */
+    const masked = maskScannerRecord(text)
     // 给它 3 秒把 POST 发出来；仍停在 scanning 就认为失败。
     // ⚠️ 必须再比对 nonce（E80 顺手修的老 bug）：只判 phase 时，**上一轮**扫描器迟到退出
     //    会把**新一轮**的 scanning 状态打成 error。
     setTimeout(() => {
       const cur = getScan()
       if (cur && cur.nonce === nonce && cur.phase === 'scanning') {
-        logWarn('token-scan', '扫描器未回传结果', {
-          code,
-          hasOutput: text.length > 0,
-          output: text.slice(0, SCAN_OUTPUT_LIMIT), // 值级脱敏：logFormat 会把形似 token 的片段掩掉
+        /**
+         * ⚠️ 两处口径（2026-10-14 实测踩到，写下来免得后人改回去）：
+         *   ① **退出码必须写进 `msg`**：`msg` 只过 token 掩码；而放进 `data.code` 会被
+         *      `redactValue` 的"8~18 位整数当学号"兜底掩成 `42****95` —— 证据直接没了。
+         *      结构化那一路另给 `codeHex`（形如 `0xffffffff`，不含 8~18 位数字串 ⇒ 掩码不动它）。
+         *   ② **输出必须是脱敏后的 `masked`**：原文只允许留在 sidecar 的 `output` 段里，
+         *      而且那份 sidecar 也已经过 `maskScannerRecord()`。
+         */
+        logWarn(
+          'token-scan',
+          `扫描器未回传结果（退出码 ${code === null ? 'null' : code}）${
+            masked ? `：${masked.slice(0, 300)}` : '，且子进程没有留下任何输出'
+          }`,
+          {
+            codeHex: code === null ? '' : `0x${(code >>> 0).toString(16)}`,
+            hasOutput: masked.length > 0,
+            log: logPath,
+          },
+        )
+        patchScan({ phase: 'error', message: describeScanFailure(code, masked, logPath) })
+      } else if (code !== 0) {
+        logWarn('token-scan', '扫描器非零退出（状态已推进，不覆盖界面）', {
+          codeHex: code === null ? '' : `0x${(code >>> 0).toString(16)}`,
           log: logPath,
         })
-        patchScan({ phase: 'error', message: describeScanFailure(code, output, logPath) })
-      } else if (code !== 0) {
-        logWarn('token-scan', '扫描器非零退出（状态已推进，不覆盖界面）', { code, log: logPath })
       } else {
         logInfo('token-scan', '扫描器正常退出', { code, log: logPath })
       }

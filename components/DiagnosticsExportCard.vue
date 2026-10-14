@@ -165,6 +165,7 @@ import {
   DIAG_RECORD_PATH,
   DIAG_RECORD_START_PATH,
   DIAG_RECORD_STOP_PATH,
+  DIAG_SCANNER_DIR,
   DIAG_TIMELINE_HEAD_KEEP,
   DIAG_TIMELINE_MAX,
   assertNoCredentials,
@@ -670,6 +671,20 @@ const manifestPreview = computed(() => {
       note: serverWindow.value
         ? `服务端文件日志，只保留记录窗口 ${serverWindow.value.id} 内的行（由服务端读取并筛选，最多回看 ${DIAG_LOG_DAYS} 天）`
         : `服务端文件日志：本次运行没有记录窗口 ⇒ 服务端按最近 ${DIAG_LOG_DAYS} 天全量收录并在包内清单写明`,
+    },
+    /**
+     * 🆕 2026-10-14（`ERROR.md` E80）：**扫描器现场** + 复现引导。
+     *
+     * 为什么把"怎么复现"写进包内清单：那次 26H2 报障的教训是"用户复现了、但我们什么都没拿到"——
+     * 现在明确告诉他：要抓「一键获取 token」的失败，**先点开始记录、再去点一次获取 token**。
+     */
+    {
+      name: `${DIAG_SCANNER_DIR}/last-scan.log`,
+      note:
+        '「一键获取 token」内存扫描器的现场原文（PowerShell 子进程输出 + 退出码）：扫描失败时由服务端落下，导出时读进包（已脱敏）。' +
+        '要复现这类失败：先点「开始记录」，再去点一次「一键获取 token」，然后回来「结束并导出」——' +
+        '这样时间线里会多一条 token-scan 的失败事件，服务端日志与这份原文能互相对上。' +
+        '（没点过「一键获取 token」的这次运行不会有这个文件；只有真的抓到现场才会出现在包内清单里。）',
     },
     /**
      * 🆕 2026-09-22「全记录」（用户原话）：如实告诉用户"日志里现在多了什么、脱敏到哪一步"。

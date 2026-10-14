@@ -203,6 +203,7 @@
 import { VERIFIED_SCHOOLS } from '~/utils/mp/schoolGate'
 import { groupRoutesByCampus } from '~/utils/mp/routeGroups'
 import { logError, logInfo, logWarn } from '~/composables/useEventLog'
+import { newEventId, reportDiagEvent } from '~/composables/useDiagEventReporter'
 import { DEMO_SESSION } from '~/src/mp/demo'
 
 const { isLoggedIn, task, session, demoMode, enableDemo } = useMpDemo()
@@ -371,6 +372,26 @@ const doTokenScan = async () => {
     tokenScanState.message = started.message || '正在扫描微信小程序进程内存…'
     const startedAt = Date.now()
 
+    /**
+     * 🆕 2026-10-14（`ERROR.md` E80）：**把"取 token 失败"记进诊断时间线**。
+     *
+     * 为什么还要在客户端记一条：失败原因**本来**会落进服务端日志（`logs/`），但维护者第一眼看的是
+     * **时间线**（`snapshot.json` 的 `timeline`）—— 26H2 那次报障里，"扫描器未回传结果"在时间线上
+     * 完全没有痕迹，于是只能靠猜。这里补上一条 `cat:'token-scan'`，与日志里的那条互为印证。
+     * ⚠️ 只上报**摘要文本**（走 `checkDiagEvent` 的 600 字符上限），完整原文在
+     * 服务端日志与 `scanner/last-scan.log` 里，不往时间线里塞大段文本。
+     */
+    const reportScanFailure = (text: string, extra: Record<string, string | number | boolean> = {}) => {
+      reportDiagEvent({
+        id: newEventId(),
+        at: new Date().toISOString(),
+        level: 'error',
+        cat: 'token-scan',
+        text: `一键获取 token 失败：${text}`,
+        data: { kind: 'token-scan', ...extra },
+      })
+    }
+
     stopScanPolling()
     scanFailures = 0
     scanTimer = setInterval(() => {
@@ -409,6 +430,8 @@ const doTokenScan = async () => {
             stopScanPolling()
             tokenScanState.running = false
             logWarn('token', `取 token 失败：${st.message ?? ''}`, { phase: st.phase })
+            /** 🆕 同时记进诊断时间线（见 `reportScanFailure` 的说明） */
+            reportScanFailure(st.message || '（没有原因文本）', { phase: st.phase, where: 'status' })
             showSnackbar(st.message || '取 token 失败：请确认电脑版微信已登录小程序后重试', 'error', { cloud: true })
           } else if (Date.now() - startedAt > 70_000) {
             stopScanPolling()
@@ -416,6 +439,8 @@ const doTokenScan = async () => {
             tokenScanState.message = '扫描超时：请确认电脑版微信已打开并登录小程序，然后重试'
             tokenScanState.running = false
             logWarn('token', '取 token 超时（70 秒）')
+            /** 🆕 超时也记进时间线（它同样是"一次没成功的复现"） */
+            reportScanFailure(tokenScanState.message, { phase: 'error', where: 'timeout' })
             showSnackbar(tokenScanState.message, 'error', { cloud: true })
           }
         } catch (err) {

@@ -53,6 +53,22 @@ export const DIAG_RECORD_GEOMETRY_PATH = `${DIAG_RECORD_PATH}/geometry`
 export const DIAG_MANIFEST_NAME = 'manifest.json'
 export const DIAG_SNAPSHOT_NAME = 'snapshot.json'
 export const DIAG_LOG_DIR = 'logs'
+/**
+ * 🆕 2026-10-14（`ERROR.md` E80）**扫描器现场**在包内的目录。
+ *
+ * 为什么要有它：「一键获取 token」的内存扫描器是**另一个进程**（PowerShell 子进程），
+ * 它的失败**没法像普通请求那样变成一行日志** —— 2026-10-14 那次 26H2 报障里，
+ * 界面上只有一个 `退出码 4294967295`，谁也说不清是被安全软件结束、还是脚本自己崩了。
+ * 现在 `tokenScanRunner` 会把子进程的 **stdout/stderr 原文**落在
+ * `%TEMP%\totoro-heaven-token\last-scan.log`，导出诊断包时把它一并收进来（已脱敏 + 过红线）。
+ */
+export const DIAG_SCANNER_DIR = 'scanner'
+/**
+ * 🆕 同上：扫描器现场文件进包的**体积上限**（默认 64 KB）。
+ * 正常情况这份文件只有几 KB（子进程输出被 `condenseScanOutput()` 收敛过）；
+ * 加上限只是防止"子进程刷屏"把包撑大 —— 超出按**文件头**截断（错误信息在前面），并在清单里注明。
+ */
+export const DIAG_SCANNER_MAX_BYTES = 64 * 1024
 /** 服务端随包附带最近几天的日志（"能带什么就带什么"，但别无限膨胀） */
 export const DIAG_LOG_DAYS = 3
 /** 包内日志文件的体积上限（超出则截断并在 manifest 里注明；防止一个几百 MB 的日志把包撑爆） */
@@ -938,6 +954,11 @@ export function diagManifestEntries(input: {
   includeGeometry: boolean
   logNote?: string
   window?: { id: string; startedAt: string; endedAt: string } | null
+  /**
+   * 🆕 2026-10-14（`ERROR.md` E80）：**扫描器现场**的文件名（不含 `scanner/` 前缀）。
+   * 只有"这次确实抓到过子进程原文"时才非空 —— 界面预览与服务端 manifest 共用这一份。
+   */
+  scannerNames?: string[]
 }): DiagManifestEntry[] {
   const entries: DiagManifestEntry[] = [
     { name: DIAG_MANIFEST_NAME, note: '本次导出的清单（本文件）' },
@@ -945,6 +966,18 @@ export function diagManifestEntries(input: {
   ]
   const baseLogNote = '服务端文件日志：每个上游请求一行（端点/耗时/上游原话/字段名，token 已掩码）'
   for (const n of input.logNames) entries.push({ name: `${DIAG_LOG_DIR}/${n}`, note: input.logNote ? `${baseLogNote}；${input.logNote}` : baseLogNote })
+  /**
+   * 🆕 扫描器现场（`scanner/`）：**PowerShell 子进程的 stdout/stderr 原文**。
+   * 它存在的意义就是"界面只剩一个退出码"时还能看见原话（26H2 那次报障的全部教训）。
+   */
+  for (const n of input.scannerNames ?? []) {
+    entries.push({
+      name: `${DIAG_SCANNER_DIR}/${n}`,
+      note:
+        '「一键获取 token」内存扫描器的现场原文（PowerShell 子进程的 stdout/stderr + 退出码），' +
+        '用于判断它是被外部结束、还是脚本自己报错（已脱敏：token 样式串与 8~18 位数字串都打码）',
+    })
+  }
   if (input.window) {
     /**
      * ⚠️ 这里的 note 会**原样渲染到界面**（`DiagnosticsExportCard.vue` 的 `{{ m.note }}`），

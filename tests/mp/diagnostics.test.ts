@@ -15,6 +15,7 @@ import {
   DIAG_LOG_DIR,
   DIAG_LOG_MAX_BYTES,
   DIAG_MANIFEST_NAME,
+  DIAG_SCANNER_DIR,
   DIAG_SNAPSHOT_NAME,
   DIAG_TIMELINE_HEAD_KEEP,
   DIAG_TIMELINE_MAX,
@@ -30,6 +31,11 @@ import {
   tokenFingerprint,
 } from '../../utils/mp/diagnostics.ts'
 import type { DiagSnapshot } from '../../utils/mp/diagnostics.ts'
+/**
+ * 🆕 2026-10-14（`ERROR.md` E80）：扫描器现场的**脱敏**判据也要钉住 ——
+ * 这一份是从"界面只剩一个退出码"这件事倒推出来的新证据，而它写盘进包的每一步都必须先脱敏。
+ */
+import { maskScannerRecord } from '../../server/utils/tokenScanRunner.ts'
 // 🆕 闸门复验第二轮：掩码侧与红线必须同源，测试里直接拿掩码函数做"掩完再喂红线"的一致性断言
 import { maskTokenLike } from '../../utils/mp/logFormat.ts'
 
@@ -221,6 +227,29 @@ test('diagnostics：diagManifestEntries 用 `logs/` 前缀列出日志，并说�
   const noGeom = diagManifestEntries({ logNames: [], includeGeometry: false })
   assert.match(noGeom[noGeom.length - 1]!.note, /不含跑道\/任务的坐标/)
   assert.ok(noGeom.every((e) => !e.name.includes(DIAG_LOG_DIR)), '没有日志时不该列出日志条目')
+})
+
+test('diagnostics：扫描器现场（scanner/）只在"真抓到"时进清单，且说明里带复现引导', () => {
+  const mixed = diagManifestEntries({ logNames: ['app-2026-09-22.log'], includeGeometry: true, scannerNames: ['last-scan.log'] })
+  assert.equal(mixed[2]!.name, `${DIAG_LOG_DIR}/app-2026-09-22.log`, '日志仍在前（既有断言与顺序不被打乱）')
+  assert.equal(mixed[3]!.name, `${DIAG_SCANNER_DIR}/last-scan.log`)
+  const scannerEntry = mixed.find((e) => e.name === `${DIAG_SCANNER_DIR}/last-scan.log`)!
+  assert.ok(scannerEntry.note.length > 0, '界面要直接展示它，必须有人话说明')
+  assert.match(scannerEntry.note, /已脱敏|打码/, '必须如实写明它已脱敏')
+
+  // 没传（这次没点过「一键获取 token」）⇒ 一条都不列，老调用方完全不受影响
+  const without = diagManifestEntries({ logNames: [], includeGeometry: false })
+  assert.equal(without.find((e) => e.name.includes(DIAG_SCANNER_DIR)), undefined)
+})
+
+test('扫描器现场脱敏：token 样式串与学号打码，但 exitCode 那一行原样保留', () => {
+  const tokenLike = `WXXCX${'A'.repeat(80)}`
+  const text = ['time    : 2026-10-14T00:00:00.000Z', 'exitCode: 4294967295', 'output  :', `POST failed: ${tokenLike} 学号 2021001234`].join('\n')
+  const masked = maskScannerRecord(text)
+  assert.match(masked, /^exitCode: 4294967295$/m, '退出码是那次报障唯一的线索，绝不能被数字串掩码毁成 42****95')
+  assert.ok(!masked.includes('2021001234'), '学号必须被打码')
+  assert.ok(!masked.includes('A'.repeat(60)), 'token 样式串必须被打码')
+  assert.equal(maskScannerRecord(masked), masked, '幂等：进包前再跑一次不会继续变形')
 })
 
 /** 一份"正常"的快照（全部字段已脱敏，理应**不**命中红线） */

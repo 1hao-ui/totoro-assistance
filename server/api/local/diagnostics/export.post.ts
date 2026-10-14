@@ -9,6 +9,7 @@
  * manifest.json      本次导出的清单与元信息（含"按哪个记录窗口过滤""剔了哪些文件/行"这类说明）
  * snapshot.json      客户端快照（原样写入，不再加工）
  * logs/app-<日期>.log 服务端文件日志（**只保留记录窗口内的行**；每文件 ≤ DIAG_LOG_MAX_BYTES，超出截断）
+ * scanner/last-scan.log 「一键获取 token」内存扫描器的**现场原文**（🆕 2026-10-14；有才进包，已脱敏 + 过红线）
  * ```
  *
  * ## 🆕 2026-09-22（issue #12 二次返工）：按**记录窗口**取数据
@@ -24,6 +25,8 @@
  * 2. 🔴 **红线自检**：`snapshot.json` / `manifest.json` 命中 ⇒ **硬拒**；**每个日志**命中 ⇒ **只剔那一个文件**
  *    （`partitionLogsByRedline()`）。错误信息里**只放类别名，绝不放命中到的原文**。
  * 3. **全程只读**：不建目录、不写任何文件；zip 在内存里拼（日志 ≤3×8MB，量级可控）。
+ *    🆕 2026-10-14 起**多读一个文件**：扫描器现场（`scanner/last-scan.log`，`tokenScanRunner` 落的），
+ *    读不到就当"这次没有现场"、不报错（它是可选证据，不能让整包失败）。
  *    ⚠️ 唯一例外在 `diagSession.ts`（它写窗口文件），本端点自身不写盘。
  * 4. **逐行容错**：日志行按 `t` 过滤时，坏的/没有时间戳的行**只跳过并计数**，绝不整包失败。
  * 5. 🔴 **窗口不一致 ⇒ 409 拒导**（2026-09-22 审计 B2 修）：客户端快照里声称的窗口 id
@@ -51,9 +54,11 @@
  * - 时间线（`snapshot.json` 里那份）由**客户端**按窗口过滤（它才持有 localStorage 里的事件日志）；
  *   服务端在这里只做**核对与如实记录**（数量对不上就在 manifest 里写明），不静默改写用户的证据。
  */
-import { DIAG_CAPTURE_DAYS, DIAG_CAPTURE_DIR, DIAG_EXPORT_PATH, DIAG_LOG_DAYS, DIAG_LOG_MAX_BYTES, DIAG_LOG_DIR, DIAG_MANIFEST_NAME, DIAG_SNAPSHOT_NAME, DIAG_TIMELINE_MAX, assertNoCredentials, diagManifestEntries, diagTimelineInWindow, diagWindowMatch, mergeDiagEvents } from '../../../../utils/mp/diagnostics'
+import { DIAG_CAPTURE_DAYS, DIAG_CAPTURE_DIR, DIAG_EXPORT_PATH, DIAG_LOG_DAYS, DIAG_LOG_MAX_BYTES, DIAG_LOG_DIR, DIAG_MANIFEST_NAME, DIAG_SCANNER_DIR, DIAG_SCANNER_MAX_BYTES, DIAG_SNAPSHOT_NAME, DIAG_TIMELINE_MAX, assertNoCredentials, diagManifestEntries, diagTimelineInWindow, diagWindowMatch, mergeDiagEvents } from '../../../../utils/mp/diagnostics'
 import type { CaptureAccount, CaptureFileEntry, DiagEvent, DiagSnapshot, DiagWindow } from '../../../../utils/mp/diagnostics'
+import { existsSync, readFileSync } from 'node:fs'
 import { assertLocalRequest } from '../../../utils/tokenScanState'
+import { maskScannerRecord, scannerLogPath } from '../../../utils/tokenScanRunner'
 import { diagLogsLinesInWindow, partitionLogsByRedline, recentLogFiles, summarizeDiagLineAccount } from '../../../utils/diagLogs'
 import { serverEventsInWindow } from '../../../utils/diagEvents'
 import { CAPTURE_DIR, CAPTURE_MAX_BYTES, captureDirBytes, readEvictedLedger, recentCaptures } from '../../../utils/captureStore'
@@ -411,6 +416,31 @@ export default defineEventHandler(async (event) => {
     }
   })
 
+  // ---------- ⑤ 扫描器现场（🆕 2026-10-14，见 `ERROR.md` E80）----------
+  /**
+   * 「一键获取 token」的内存扫描器是**独立子进程**，它的失败不会变成一行"请求日志"——
+   * 界面上往往只剩一个退出码（26H2 那次报障的全部线索就是 `4294967295`）。
+   * 把 `tokenScanRunner` 落下的现场原文收进包，"被外部结束 / 脚本自己报错"才有据可依。
+   *
+   * 三道处理与日志**同源**：`maskScannerRecord()` 脱敏（**幂等**；`exitCode:` 那一行豁免 ——
+   * 退出码是 10 位数字，被数字串掩码毁掉就等于把证据毁了）→ `assertNoCredentials()` 红线自检
+   * → 命中就**整份不进包**并如实记账（绝不让凭证明文发出去）。
+   */
+  const scannerRecord = (() => {
+    const p = scannerLogPath()
+    if (!existsSync(p)) return null
+    try {
+      const raw = readFileSync(p, 'utf8')
+      const truncated = raw.length > DIAG_SCANNER_MAX_BYTES
+      const text = maskScannerRecord(truncated ? raw.slice(0, DIAG_SCANNER_MAX_BYTES) : raw)
+      return { name: 'last-scan.log', text, truncated, bytes: Buffer.byteLength(text, 'utf8'), redline: assertNoCredentials([text]) }
+    } catch {
+      /** 读不到就当"这次没有现场文件"（不因为一个可选文件让整包失败） */
+      return null
+    }
+  })()
+  const scannerKept = scannerRecord !== null && scannerRecord.redline.ok
+
   // ---------- ⑤ 生成 manifest.json ----------
   /** 客户端快照自带的时间线（已按窗口过滤）；这里**核对**它，不改写 */
   const clientTimeline = Array.isArray(snap?.timeline) ? snap.timeline : []
@@ -617,6 +647,24 @@ export default defineEventHandler(async (event) => {
         excludedLogsLines: account.excluded.lines,
       },
     },
+    /**
+     * 🆕 2026-10-14（`ERROR.md` E80）**扫描器现场**：包里有没有这份、多大、有没有被红线剔掉。
+     * 它是"界面上只剩一个退出码"时唯一的原始线索 ⇒ **有没有、为什么没有**都必须写清楚，
+     * 否则维护者会把"这次没抓"读成"这次没失败"。
+     */
+    scanner: {
+      present: scannerRecord !== null,
+      inPackage: scannerKept,
+      file: scannerRecord ? `${DIAG_SCANNER_DIR}/${scannerRecord.name}` : '',
+      bytes: scannerKept && scannerRecord ? scannerRecord.bytes : 0,
+      truncated: scannerKept && scannerRecord ? scannerRecord.truncated : false,
+      redlineExcluded: scannerRecord !== null && !scannerRecord.redline.ok,
+      note: scannerKept
+        ? '包含「一键获取 token」内存扫描器的现场原文（PowerShell 子进程 stdout/stderr + 退出码；已脱敏）—— 用来分辨"被外部结束"与"脚本自己报错"。'
+        : scannerRecord
+          ? '这次有扫描器现场，但它命中凭证样式红线，已按纪律整份剔出（原文仍在报障那台机器的临时目录里）。'
+          : '这份包里没有扫描器现场（这次运行没点过「一键获取 token」，或现场文件已被清理）。',
+    },
     /** 客户端快照自己的时间/版本（与上面的导出时刻区分开） */
     snapshot: {
       collectedAt: snap?.collectedAt ?? '',
@@ -691,6 +739,8 @@ export default defineEventHandler(async (event) => {
           ? `本次只收录记录窗口内的日志行（共保留 ${account.keptLines} 行，剔除窗口外 ${account.droppedLines} 行${account.unparsableLines ? `、无时间戳 ${account.unparsableLines} 行` : ''}）`
           : '未按记录窗口过滤（本次运行没有记录窗口）⇒ 收录最近 ' + DIAG_LOG_DAYS + ' 天的全量日志',
         window: win ? { id: win.id, startedAt: win.startedAt, endedAt: win.endedAt } : null,
+        /** 🆕 扫描器现场（只有这次确实抓到过才列它） */
+        scannerNames: scannerKept && scannerRecord ? [scannerRecord.name] : [],
       }).map((e) => {
         const extra = logEntries.find((l) => l.name === e.name)
         return { ...e, note: extra ? extra.note : e.note }
@@ -705,6 +755,24 @@ export default defineEventHandler(async (event) => {
               '这通常是日志掩码没盖住某种凭证样式，请把这条提示一并告知开发者（不影响本包其它内容）。',
           }]
         : []),
+      /**
+       * 🆕 扫描器现场的两条如实说明：**被红线剔掉**（只报类别名，不回显原文）与**被体积截断**。
+       * 都要写出来 —— 否则维护者会以为"这次没发生扫描器失败"或"原文本来就这么多"。
+       */
+      ...(scannerRecord && !scannerRecord.redline.ok
+        ? [{
+            name: '(扫描器现场已排除)',
+            note:
+              `scanner/${scannerRecord.name} 因命中凭证样式被自动排除（${scannerRecord.redline.hits.join('、')}）：` +
+              '子进程输出里出现了凭证样式串，说明掩码没盖住某种写法，请把这条提示一并告知开发者（不影响本包其它内容）。',
+          }]
+        : []),
+      ...(scannerKept && scannerRecord?.truncated
+        ? [{
+            name: '(扫描器现场已截断)',
+            note: `scanner/${scannerRecord.name} 超过 ${DIAG_SCANNER_MAX_BYTES} 字节，只保留了文件头（错误信息在前面）；原文仍在报障那台机器的临时目录里。`,
+          }]
+        : []),
     ],
     /** 明确写出来：本包不含凭证明文（红线自检在打包前已经跑过） */
     privacy: {
@@ -713,7 +781,9 @@ export default defineEventHandler(async (event) => {
       redlineExcludedLogs: excludedScoped.map((x) => x.file.name),
       /** 🆕 因命中凭证样式被自动排除的**响应原文**文件名（空数组=没有排除） */
       redlineExcludedCaptures: excludedCaptures.map((c) => c.name),
-      note: 'token 明文、学号/姓名原文均不在包内（客户端已脱敏；服务端日志与响应原文由同一套判据掩码）',
+      /** 🆕 2026-10-14：**扫描器现场**有没有因红线被剔（`true` = 这次有现场但没能进包） */
+      redlineExcludedScanner: scannerRecord !== null && !scannerRecord.redline.ok,
+      note: 'token 明文、学号/姓名原文均不在包内（客户端已脱敏；服务端日志、响应原文与扫描器现场由同一套判据掩码）',
     },
   }
   const manifestJson = JSON.stringify(manifest, null, 2)
@@ -742,12 +812,22 @@ export default defineEventHandler(async (event) => {
     ...safeCaptureItems
       .filter((c) => c.raw.meta)
       .map((c) => ({ name: `${DIAG_CAPTURE_DIR}/${c.name}.meta.json`, data: Buffer.from(JSON.stringify({ ...c.raw.meta, bytes: c.bytes, geometryStripped: c.geometryStripped }, null, 2), 'utf8') })),
+    /**
+     * 🆕 2026-10-14 扫描器现场（`scanner/last-scan.log`）—— 已 `maskScannerRecord()` 脱敏 + 过红线；
+     * 空/未命中红线才进包（见上面的 `scannerKept`）。
+     */
+    ...(scannerKept && scannerRecord
+      ? [{ name: `${DIAG_SCANNER_DIR}/${scannerRecord.name}`, data: Buffer.from(scannerRecord.text, 'utf8') }]
+      : []),
   ])
 
   const filename = `totoro-diagnostics-${compactStamp(now)}.zip`
   logInfo('ui', '导出诊断包', {
-    files: 2 + safeLogs.length + safeCaptureItems.length,
+    files: 2 + safeLogs.length + safeCaptureItems.length + (scannerKept ? 1 : 0),
     logFiles: safeLogs.length,
+    /** 🆕 扫描器现场：进包了吗 / 多大（有没有、为什么没有，见 manifest 的 `scanner` 段） */
+    scannerFile: scannerKept,
+    scannerBytes: scannerKept && scannerRecord ? scannerRecord.bytes : 0,
     logFilesExcluded: excludedLogs.length,
     logFilesTruncated: account.truncatedFiles,
     /** 🆕 响应原文：进包份数 / 字节 / 被红线剔除份数 / 因坐标开关剥过几份 */
