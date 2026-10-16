@@ -401,7 +401,7 @@ export const MpApiWrapper = {
    * 早操签到记录（只读：`scoreList` / `completedTimes` / `requireNumber` / `ifDayHasComSign`）。
    *
    * ⚠️ **2026-09-21 修正入参**（此前只传 `stuNumber` ⇒ 服务端当"没指定学期/月份"⇒ 回空 ⇒ 页面读不出数据）：
-   * 照厂商小程序 `app-service.js` 的 `getMorningData`，**必须带 `termId` 与两位的 `monthId`**，
+   * 按接口契约，**必须带 `termId` 与两位的 `monthId`**，
    * 学号字段名是 **`stuNumber`**（不是 snCode），**body 里不带 token**（鉴权走 `Authorization` 头）。
    * 参数构造与归一化在 `utils/mp/mornSignArch.ts`（纯函数 + 单测）。
    */

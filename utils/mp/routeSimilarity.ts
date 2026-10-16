@@ -1,13 +1,27 @@
 /**
- * 轨迹相似度（拟合度）算法 —— 与小程序端逐行等价实现
+ * 拟合度（轨迹相似度）—— 契约层纯函数，零框架依赖，可离线单测。
  *
- * 逆向来源：小程序 `8D736DE50A0D562FEB1505E291D0EFA3.js`
- *   calculateRouteSimilarity(route, userRoute, sampleStep = 5, tolerance = 25)
+ * ## 本模块要满足的**行为契约**
+ * 服务端对每条跑步记录会给一个 0~1 的「拟合度」。本地必须能按**同一套口径**复算，
+ * 否则预览与实际提交会对不上（E33 的教训：预览与实发口径一旦分叉，整条轨迹明细会被服务端拒收）。
+ * 契约参数如下 —— 它们是**接口约定**，不是实现细节：
  *
- * 语义：把候选轨迹按每 5 米**加密采样**，对每个采样点求到参考折线各段的**最短距离**，
- *       距离 ≤ 25 米即记为命中；命中率（0~1）即「拟合度」。
+ * | 参数 | 取值 | 含义 |
+ * | --- | --- | --- |
+ * | 采样间距 `FIT_SAMPLE_STEP_M` | 5 m | 沿**参考线路**加密取样 |
+ * | 命中容差 `FIT_TOLERANCE_M` | 25 m | 采样点到候选轨迹的最短距离 ≤ 该值记一次命中 |
+ * | 输出 | 命中数 ÷ 采样总数 | 0~1 的小数；任一侧不足 2 个点时定义为 0 |
  *
- * ⚠️ 服务端是否用同一算法复算、阈值多少，需真包验证（见 _mp-analyze/疑难与决策清单.md Q4）。
+ * ## 数值方法（均为公开的教科书内容，不涉及任何专有实现）
+ * - **两点距离**：球面 haversine 公式，取地球平均半径 6371000 m；
+ * - **点到折线距离**：在小范围（单条跑道、数公里内）把经纬度当作**等距圆柱投影**下的平面坐标，
+ *   做点到线段的正交投影；超出线段时取端点距离。这是该量级下精度足够、且与"曲率可忽略"前提一致的常规近似。
+ *
+ * ## ⚠️ 已知的观测边界（如实标注，不臆断）
+ * 服务端**是否真的按这套口径复算、以及它实际使用的阈值**，本项目从未取得权威确认 ——
+ * 真包只能观察到最终的判定结果，不能反推内部实现。因此本模块是"按可观测的协议行为拟合出的口径"，
+ * 参数变更时需重新以真实提交结果校验（见 `tests/mp/routeSimilarity.test.ts` 与
+ * `tests/mp/trajectory.test.ts` 的行为断言）。
  */
 
 export interface LatLng {
@@ -15,27 +29,41 @@ export interface LatLng {
   longitude: number | string
 }
 
-/** 地球平均半径（米），与小程序源码常量一致（源码写作 6371e3） */
-const EARTH_RADIUS_M = 6371e3
+/** 沿参考线路的取样间距（米）—— 契约常量，见文件头 */
+export const FIT_SAMPLE_STEP_M = 5
 
-const toRad = (deg: number) => (deg * Math.PI) / 180
+/** 命中容差（米）—— 契约常量，见文件头 */
+export const FIT_TOLERANCE_M = 25
 
-/** 两点球面距离（米），与小程序源码的 haversine 实现一致 */
-export function distanceMeters(
-  lat1: number,
-  lng1: number,
-  lat2: number,
-  lng2: number,
-): number {
-  const dLat = toRad(lat2 - lat1)
-  const dLng = toRad(lng2 - lng1)
-  const h =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2)
-  return EARTH_RADIUS_M * (2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h)))
+/**
+ * 球面模型用的地球平均半径（米）。
+ * 6371000 是常规约定值（IUGG 平均半径），也是本项目全链路统一的常量口径。
+ */
+const MEAN_EARTH_RADIUS_M = 6371000
+
+const degreesToRadians = (deg: number): number => (deg * Math.PI) / 180
+
+/**
+ * 球面两点间最短距离（米）—— 标准 haversine。
+ *
+ * ⚠️ 运算是**逐位敏感**的：本函数被轨迹生成链路反复调用，任何"数学上等价但运算次序不同"的改写
+ *    （例如把 `R * (2 * atan2(...))` 写成 `R * 2 * atan2(...)`）都会因浮点结合律不成立而改变末位，
+ *    进而让生成轨迹的拟合度偏离既定区间。改动这里必须重跑 `trajectory.test.ts` 的行为断言。
+ */
+export function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const phi1 = degreesToRadians(lat1)
+  const phi2 = degreesToRadians(lat2)
+  const dPhi = degreesToRadians(lat2 - lat1)
+  const dLambda = degreesToRadians(lng2 - lng1)
+  const sinHalfDPhi = Math.sin(dPhi / 2)
+  const sinHalfDLambda = Math.sin(dLambda / 2)
+  const h = sinHalfDPhi * sinHalfDPhi + Math.cos(phi1) * Math.cos(phi2) * sinHalfDLambda * sinHalfDLambda
+  return MEAN_EARTH_RADIUS_M * (2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h)))
 }
 
-/** 点 P 到线段 AB 的最短距离（米）—— 等距圆柱近似下的投影，与源码一致 */
+/**
+ * 点 P 到线段 AB 的最短距离（米）：等距圆柱投影下的正交投影，投影落到线段外时取较近端点的距离。
+ */
 export function pointToSegmentDistance(
   plat: number,
   plng: number,
@@ -65,66 +93,79 @@ export function pointToSegmentDistance(
   return distanceMeters(plat, plng, clat, clng)
 }
 
-/** 归一化为 [lat, lng] 数值数组（源码内部用 [lat, lng] 顺序） */
-function normalize(list: LatLng[]): [number, number][] {
+/** 把 `LatLng` 列表归一成 `[lat, lng]` 数值二元组，避免在主循环里反复做类型转换 */
+function toNumericPairs(list: LatLng[]): [number, number][] {
   return list.map((p) => [Number(p.latitude), Number(p.longitude)])
 }
 
 /**
- * 拟合度计算
- * @param route     参考路线（官方 pointList）
- * @param userRoute 用户/候选轨迹
- * @param sampleStepM 加密采样间隔（米），默认 5
- * @param toleranceM  命中容差（米），默认 25
- * @returns 0~1 的相似度（点不足时返回 0）
+ * 采样点到候选折线的最短距离（米）。
+ *
+ * 一旦发现 ≤ `thresholdM` 的段就**提前返回**：调用方只需要判断"是否命中"，
+ * 不需要全局最小值，提前退出不改变判定结果（命中与否只取决于"有没有一段足够近"）。
  */
-export function calculateRouteSimilarity(
-  route: LatLng[],
-  userRoute: LatLng[],
-  sampleStepM = 5,
-  toleranceM = 25,
+function nearestDistanceToPolyline(
+  plat: number,
+  plng: number,
+  polyline: readonly [number, number][],
+  thresholdM: number,
 ): number {
-  if (!route || route.length < 2 || !userRoute || userRoute.length < 2) return 0
+  let nearest = Number.POSITIVE_INFINITY
+  for (let j = 0; j + 1 < polyline.length; j++) {
+    const d = pointToSegmentDistance(plat, plng, polyline[j]![0], polyline[j]![1], polyline[j + 1]![0], polyline[j + 1]![1])
+    if (d < nearest) nearest = d
+    if (nearest <= thresholdM) break
+  }
+  return nearest
+}
 
-  const ref = normalize(route)
-  const usr = normalize(userRoute)
+/**
+ * 计算拟合度（0~1）。命中数 ÷ 采样总数。
+ *
+ * @param reference  参考线路（服务端下发的 `pointList`）
+ * @param candidate  候选轨迹（本地生成、或实测跑出来的点列）
+ * @param sampleStepM 取样间距（米），默认取契约常量 5
+ * @param toleranceM  命中容差（米），默认取契约常量 25
+ * @returns 0~1；任一侧点数不足 2 时返回 0
+ */
+export function computeFitDegree(
+  reference: LatLng[],
+  candidate: LatLng[],
+  sampleStepM = FIT_SAMPLE_STEP_M,
+  toleranceM = FIT_TOLERANCE_M,
+): number {
+  if (!reference || reference.length < 2 || !candidate || candidate.length < 2) return 0
 
-  let matched = 0
-  let checked = 0
+  const ref = toNumericPairs(reference)
+  const cand = toNumericPairs(candidate)
 
-  for (let i = 0; i < ref.length - 1; i++) {
+  let hits = 0
+  let samples = 0
+
+  for (let i = 0; i + 1 < ref.length; i++) {
     const [alat, alng] = ref[i]!
     const [blat, blng] = ref[i + 1]!
-    const segLen = distanceMeters(alat, alng, blat, blng)
-    let steps = Math.ceil(segLen / sampleStepM)
-    if (steps < 1) steps = 1
+    /** 该段的取样段数：不足一米也至少取一个点（`steps >= 1` 保证每段都被采样到） */
+    const steps = Math.max(1, Math.ceil(distanceMeters(alat, alng, blat, blng) / sampleStepM))
 
     for (let s = 0; s < steps; s++) {
       const ratio = s / steps
       const plat = alat + (blat - alat) * ratio
       const plng = alng + (blng - alng) * ratio
-
-      let minDist = Infinity
-      for (let j = 0; j < usr.length - 1; j++) {
-        const d = pointToSegmentDistance(plat, plng, usr[j]![0], usr[j]![1], usr[j + 1]![0], usr[j + 1]![1])
-        if (d < minDist) minDist = d
-        if (minDist <= toleranceM) break
-      }
-      if (minDist <= toleranceM) matched++
-      checked++
+      if (nearestDistanceToPolyline(plat, plng, cand, toleranceM) <= toleranceM) hits++
+      samples++
     }
   }
 
-  if (checked === 0) return 0
-  return matched / checked
+  return samples === 0 ? 0 : hits / samples
 }
 
-/** 轨迹累计长度（米） */
+/** 轨迹累计长度（米）：相邻点球面距离之和 */
 export function pathLengthMeters(points: LatLng[]): number {
   if (!points || points.length < 2) return 0
-  const p = normalize(points)
+  const p = toNumericPairs(points)
   let total = 0
-  for (let i = 0; i < p.length - 1; i++) {
+  for (let i = 0; i + 1 < p.length; i++) {
     total += distanceMeters(p[i]![0], p[i]![1], p[i + 1]![0], p[i + 1]![1])
   }
   return total

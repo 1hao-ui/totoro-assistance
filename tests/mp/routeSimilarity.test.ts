@@ -1,10 +1,10 @@
 /**
- * 拟合度算法测试（对齐小程序端参数：5m 采样 / 25m 容差）
+ * 拟合度算法测试（契约参数：5m 采样 / 25m 容差）
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  calculateRouteSimilarity,
+  computeFitDegree,
   distanceMeters,
   pathLengthMeters,
   pointToSegmentDistance,
@@ -39,33 +39,33 @@ test('pointToSegmentDistance：投影落在端点外（取端点距离）', () =
 
 test('拟合度：同一路线自身 = 1', () => {
   const r = lineRoute()
-  assert.equal(calculateRouteSimilarity(r, r), 1)
+  assert.equal(computeFitDegree(r, r), 1)
 })
 
 test('拟合度：走廊内抖动（σ=2.2m）仍为 1', () => {
   const r = lineRoute()
   // 每点向北偏移 2 米（远小于 25m 容差）
   const jittered = r.map((p) => ({ ...p, latitude: p.latitude + 2 / 111320 }))
-  assert.equal(calculateRouteSimilarity(r, jittered), 1)
+  assert.equal(computeFitDegree(r, jittered), 1)
 })
 
 test('拟合度：整体偏移超过容差 → 命中率下降', () => {
   const r = lineRoute()
   // 每点向东偏移 200 米（远超 25m 容差）
   const far = r.map((p) => ({ ...p, longitude: p.longitude + 200 / (111320 * Math.cos((32 * Math.PI) / 180)) }))
-  const score = calculateRouteSimilarity(r, far)
+  const score = computeFitDegree(r, far)
   assert.ok(score < 0.1, `实际 ${score}`)
 })
 
 test('拟合度：点不足时返回 0', () => {
-  assert.equal(calculateRouteSimilarity(lineRoute(), [{ latitude: 32, longitude: 118 }]), 0)
-  assert.equal(calculateRouteSimilarity([], lineRoute()), 0)
+  assert.equal(computeFitDegree(lineRoute(), [{ latitude: 32, longitude: 118 }]), 0)
+  assert.equal(computeFitDegree([], lineRoute()), 0)
 })
 
 test('拟合度：半程轨迹 → 约 0.5 上下（不高于 1）', () => {
   const r = lineRoute()
   const half = r.slice(0, 6)
-  const score = calculateRouteSimilarity(r, half)
+  const score = computeFitDegree(r, half)
   assert.ok(score > 0.3 && score <= 1, `实际 ${score}`)
 })
 

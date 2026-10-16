@@ -11,10 +11,10 @@
  *   必须用**全局弧长**做插值推进，不能用「每段内部从段首按步长走」——
  *   后者在闭合路线跑第二圈时会从段首重启，产生 m 级跳变，拟合度直接掉到 0.45。
  *
- * 逆向依据：`_mp-analyze/小程序逆向分析.md` 第 5.3 节（算法参数 5m/25m）
+ * 采样与容差参数取自契约常量 `FIT_SAMPLE_STEP_M` / `FIT_TOLERANCE_M`（见 `utils/mp/routeSimilarity.ts` 文件头）
  */
 
-import { distanceMeters, calculateRouteSimilarity, pointToSegmentDistance, type LatLng } from './routeSimilarity'
+import { distanceMeters, computeFitDegree, pointToSegmentDistance, type LatLng } from './routeSimilarity'
 
 export interface CorridorOptions {
   /** 目标里程（公里） */
@@ -577,7 +577,7 @@ export function generateCorridorRoute(officialRoute: LatLng[], options: Corridor
 
   // 车道模型是**确定性**的（偏移由弧长与随机种子决定，不再有"加码档位"）⇒ 直接构建一次即可。
   const built = buildTrajectory(1, 1)
-  const fit = calculateRouteSimilarity(route, built.pts)
+  const fit = computeFitDegree(route, built.pts)
 
   // 实际用到的圈数（诊断/测试用）：按**真实走过的里程**除以"一圈长度"推
   const lapsUsed = Math.max(1, Math.ceil(built.accumulated / lapLengthM))

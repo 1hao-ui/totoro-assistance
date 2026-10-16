@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { generateCorridorRoute, buildTimeline } from '../../utils/mp/generateRoute.ts'
-import { calculateRouteSimilarity, pathLengthMeters, distanceMeters } from '../../utils/mp/routeSimilarity.ts'
+import { computeFitDegree, pathLengthMeters, distanceMeters } from '../../utils/mp/routeSimilarity.ts'
 import {
   buildRunStats,
   buildTimeFields,
@@ -53,14 +53,14 @@ test('generateCorridorRoute：抖动量级符合设定（不越出走廊）', ()
   const route = loopRoute()
   const g = generateCorridorRoute(route, { targetKm: 0.6, seed: 13, jitterSigmaM: 2.2 })
   const official = route.map((p) => ({ latitude: p.latitude, longitude: p.longitude }))
-  const score = calculateRouteSimilarity(official, g.points, 5, 25)
+  const score = computeFitDegree(official, g.points, 5, 25)
   assert.ok(score >= 0.95, `拟合度 ${score}`)
 })
 
 test('generateCorridorRoute：拟合度 ≥ 0.95（走廊内抖动）', () => {
   const route = loopRoute()
   const g = generateCorridorRoute(route, { targetKm: 0.5, seed: 7 })
-  const score = calculateRouteSimilarity(
+  const score = computeFitDegree(
     route,
     g.points.map((p) => ({ latitude: p.latitude, longitude: p.longitude })),
   )
@@ -74,7 +74,7 @@ test('generateCorridorRoute：drift 开启后拟合度仍落进 0.97~1.00（2026
     const g = generateCorridorRoute(route, { targetKm: 0.6, seed, drift: true })
     assert.ok(g.driftEpisodes > 0, `seed=${seed} 应至少产生一次精度下降期`)
     const pts = g.points.map((p) => ({ latitude: p.latitude, longitude: p.longitude }))
-    return calculateRouteSimilarity(route, pts)
+    return computeFitDegree(route, pts)
   })
   for (const [i, score] of scores.entries()) {
     // 2026-09-17 口径变更：**拟合度容差是 25 m** ⇒ 想把拟合度压到 0.8x 就必须偏离路线 25 m+（甩出跑道）。

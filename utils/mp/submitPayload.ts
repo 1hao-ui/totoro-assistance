@@ -62,13 +62,12 @@ export interface RealSubmitContext {
 }
 
 /**
- * getRunBegin 报文（注意：**不带 token**，照源码）。
+ * getRunBegin 报文（注意：**不带 token** —— 鉴权走 `Authorization` 头）。
  *
- * ⚠️ **自由跑口径**（2026-09-18 从厂商反编译源码读出的权威依据，`_mp-analyze/extracted/app-service.js`）：
- * ```js
- * 2==a.data.runType && (i=1),                        // 2(自由跑) → 提交 runType=1
- * 0==a.data.runType && (o=a.data.columnsLine[...]),  // 只有 0(阳光跑) 才取线路
- * r={runType:i, ..., paperId:o.taskId||"", lineId:o.pointId||""}
+ * ⚠️ **自由跑口径**（按实测报文核对确认）：
+ * ```text
+ * 阳光跑(runType=0): runType=0，paperId/lineId 取自所选线路的 taskId/pointId
+ * 自由跑(runType=1): runType=1，且 paperId/lineId **都是空串**（不取线路）
  * ```
  * 即：**自由跑传 `runType:1`，且 `paperId`/`lineId` 都是空串**（不去取线路）。
  * 传 `line` 时按阳光跑口径取该线路的 taskId/pointId；**`line` 可为空**（自由跑）。

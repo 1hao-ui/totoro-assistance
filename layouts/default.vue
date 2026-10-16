@@ -24,7 +24,7 @@
       <v-btn to="/field" variant="text" prepend-icon="mdi-map-marker-radius" class="text-none">我的场地</v-btn>
       <v-btn to="/data" variant="text" prepend-icon="mdi-database-outline" class="text-none">数据</v-btn>
       <v-btn to="/version-info" variant="text" prepend-icon="mdi-image-multiple-outline" class="text-none">版本</v-btn>
-      <!-- 授权（2026-10-16 新增）：**必须常驻可见** —— 未授权时整个软件不可用，
+      <!-- 授权（2026-10-16 新增）：必须常驻可见 —— 未授权时整个软件不可用，
            用户要能一眼找到「授权」页去取机器码/粘贴证书；藏进二级菜单会让人无从下手。 -->
       <v-btn to="/license" variant="text" prepend-icon="mdi-key-variant" class="text-none">授权</v-btn>
       <!-- 鸣谢（2026-09-25 用户要求接进正式软件）：以前只能按 `/credits` 直连访问，现在给一个顶栏入口。

@@ -11,7 +11,7 @@
       </div>
     </v-alert>
 
-    <!-- 公钥未配置：这是**发布方**的配置问题，用户做什么都没用，必须明确指出，避免用户白折腾 -->
+    <!-- 公钥未配置：这是「发布方」的配置问题，用户做什么都没用，必须明确指出，避免用户白折腾 -->
     <v-alert v-if="!status.publicKeyConfigured" type="error" variant="tonal" density="comfortable" class="mb-4">
       <div class="font-weight-bold">
         <v-icon class="mr-1">mdi-alert-octagon-outline</v-icon>本程序尚未配置许可证公钥
