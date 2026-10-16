@@ -19,9 +19,13 @@
  * 🆕 2026-10-14（E80 轮，起因：有用户在 Windows 26H2 上报"扫描器未回传结果（退出码 4294967295）"）：
  *   ① **加 `trap`：任何未捕获错误都先把失败原因回传**，不再让界面只看到一个冷冰冰的退出码；
  *   ② **`$script:TotoroPhase` 记录"死在哪一步"**，随载荷一起回传（start/compile/enumerate/scan/post）；
- *   ③ **参数名 `-Endpoint` → `-CallbackUrl`**：⚠️ 注意口径 —— 这**不是**因为"`-Endpoint` 会被 PowerShell 吃掉"
- *      （官方开关表里从来没有它，`-File` 之后的一切参数都归脚本，本机实测也一直是通的）；
- *      纯粹是**零成本避嫌**：万一将来 `powershell.exe` 换了内核、多了同名宿主开关，这个名字更不容易撞。
+ *   ③ **参数名 `-Endpoint` → `-CallbackUrl`**：⚠️ 口径 —— 这**不是**根因，而且**已被实测否掉**：
+ *      「宿主把 `-Endpoint` 当自己的开关吃掉」这个假说，在**真 Windows 11 26H2（build 26300.9711）**上
+ *      用四个用例验过 —— 原名 / 改名 / 原名+`-NonInteractive` **全部退 0**，宿主级 `-Endpoint` 退 1
+ *      （"无法识别为 cmdlet"），且那台宿主的 `-Help` 开关表里**没有 `-Endpoint`**（只有 `-WorkingDirectory` 这类）。
+ *      ⇒ **名字当年不是原因**。改名留着只是**零成本避嫌**（万一将来换了内核、多了同名宿主开关时不容易撞），
+ *      但**谁也别再把它写成"修复了什么"**。
+ *      复现探针：`_mp-analyze/scratch/probe-26h2-endpoint.ps1`；那份实测报告：`download/report.txt`（详见 ERROR.md E80）。
  *   ④ **把 `[Console]::OutputEncoding` 固定成 UTF-8**：否则中文错误信息在 GBK 控制台下会写成乱码，
  *      抓回来也读不懂（`tokenScanRunner.ts` 另有一层 GBK 兜底解码）。
  */
