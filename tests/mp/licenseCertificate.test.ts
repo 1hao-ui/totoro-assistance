@@ -82,8 +82,15 @@ test('篡改签名 ⇒ bad_signature', () => {
   const { pub, priv } = makeKeys()
   const { certificate } = issueCertificate({ lic: 'TH-X', sub: 's', fingerprint: FP, days: 30 }, priv)
   const [body, sig] = certificate.split('.')
-  // 翻转签名最后一个字符（base64url 内换一个字符，长度不变）
-  const flipped = sig.slice(0, -1) + (sig.endsWith('A') ? 'B' : 'A')
+  /**
+   * ⚠️ **必须改签名的中段，不能改最后一个字符**（这里踩过一次 flaky，值得记下来）：
+   * Ed25519 签名是 64 字节 = 512 bit，base64url 编成 86 个字符，最后一个字符只承载 **2 个有效 bit**
+   * （其余 4 bit 必须补零）。所以末位 `A`→`B` 解出来的字节**完全一样**、签名根本没被改动，
+   * 验证自然还是通过 ⇒ 断言随机地失败。中段的字符承载完整 6 bit，改动必然改变签名字节。
+   */
+  const at = 10
+  const flipped = sig.slice(0, at) + (sig[at] === 'A' ? 'B' : 'A') + sig.slice(at + 1)
+  assert.notEqual(flipped, sig, '篡改后必须与原签名不同（否则这个用例等于没测）')
   assert.equal(verifyCertificate(`${body}.${flipped}`, pub, { fingerprint: FP }).code, 'bad_signature')
 })
 

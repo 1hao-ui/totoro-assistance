@@ -49,7 +49,7 @@ test('mornSignCrypto：分段按 **UTF-8 字节宽度**（不是按字符数）'
   }
 })
 
-test('mornSignCrypto：空串返回空串（照厂商行为）', () => {
+test('mornSignCrypto：空串返回空串（空明文无需加密）', () => {
   assert.equal(encryptLong(''), '')
 })
 

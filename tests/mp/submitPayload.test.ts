@@ -76,11 +76,11 @@ test('buildRunBeginRequest：自由跑 runType=1 原样透传', () => {
 })
 
 /**
- * ⚠️ 2026-09-18 补（自由跑落地）：厂商源码在自由跑时**根本不取线路**
- * （`0==runType && (o=columnsLine[...])`），`paperId`/`lineId` 都是空串。
+ * ⚠️ 2026-09-18 补（自由跑落地）：自由跑**不取线路**（按实测报文确认），
+ * `paperId`/`lineId` 都是空串。
  * 所以 `line` 传 `null` 或干脆不传，都必须安全地给出空串 —— 这是自由跑能跑起来的前提。
  */
-test('buildRunBeginRequest：自由跑不传线路 ⇒ paperId/lineId 都是空串（照厂商源码）', () => {
+test('buildRunBeginRequest：自由跑不传线路 ⇒ paperId/lineId 都是空串（契约）', () => {
   const req = buildRunBeginRequest({ runType: 1 })
   assert.equal(req.runType, 1)
   assert.equal(req.paperId, '')

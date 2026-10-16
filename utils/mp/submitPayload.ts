@@ -29,7 +29,7 @@ export interface RealSubmitContext {
   task: MpSunrunTask | null
   /**
    * 选中线路（其 pointId 即 lineId、taskId 即 paperId）。
-   * ⚠️ **自由跑为 `null`**（厂商源码：只有阳光跑才取线路；自由跑 paperId/lineId 都是空串）。
+   * ⚠️ **自由跑为 `null`**（契约：只有阳光跑才取线路；自由跑 paperId/lineId 都是空串）。
    * ⚠️ **服务端未下发线路的任务**（`routeRequirementOf(task).kind === 'free'`）也为 `null` ——
    *    此时任务号由下面的 `paperId` 兜底（见 `buildScoreRequest` 的 taskId 分支）。
    */
