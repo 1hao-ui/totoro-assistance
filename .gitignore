@@ -72,6 +72,16 @@ session*.json
 secrets/
 private/
 
+# 🆕 2026-10-16：许可证**私钥**与**签发台账**（🔴 绝不入库）
+# `tools/keys/` 里放两样东西：
+#   ① license-private.pem —— Ed25519 **私钥**，泄漏 = 别人能自己签发证书，整套门禁失效；
+#   ② issued.jsonl —— 每次签发的台账，**含客户名与机器码**（属个人信息，不该公开）。
+# ⚠️ 上面已有的 `*.pem` / `*.key` 只挡住私钥本身，**挡不住 issued.jsonl**（它是 .jsonl），
+#    将来往该目录加文件也容易漏 ⇒ 这里**按目录整体屏蔽**，一条覆盖全部。
+# 判据（可执行）：`git check-ignore -v --no-index -- tools/keys/issued.jsonl` 必须命中。
+#    ⚠️ 必须带 `--no-index`：不加它时**文件不存在**也会返回 exit=1（看起来像"没被忽略"，本仓踩过这个坑）。
+/tools/keys/
+
 # editor
 .vscode/
 .idea/

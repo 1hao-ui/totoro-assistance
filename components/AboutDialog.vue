@@ -36,18 +36,19 @@
           仅用于教育与研究目的，请遵守所在学校的规章制度，作者不对任何违规使用负责。
         </v-alert>
 
-        <!-- 🚫 谢绝公开分享（用户 2026-09-20 要求：软件内也要有这条说明；与 README / 版本信息页同一口径） -->
-        <v-alert type="error" variant="tonal" density="comfortable" class="mt-3">
+        <!-- 🔑 授权与使用范围（2026-10-16 改写：原「谢绝公开分享 / 完全免费」口径与新增的授权门禁冲突，
+             现与协作版 README 的行文口径保持一致） -->
+        <v-alert type="warning" variant="tonal" density="comfortable" class="mt-3">
           <div class="font-weight-bold">
-            <v-icon class="mr-1" size="20">mdi-share-off-outline</v-icon>谢绝公开分享
+            <v-icon class="mr-1" size="20">mdi-key-variant</v-icon>授权与使用范围
           </div>
           <div class="text-body-2 mt-1">
-            本工具<b>仅供本人自用</b>：请勿公开分享、转发或二次分发，也不要代他人运行、代他人提交。
-            传播范围越大，校方与厂商收紧风控越快，最后大家都用不了；
-            而且<b>真实提交是你本人的账号行为</b>，替别人跑等于把风险转嫁给别人。
+            本程序需发布者签发的<b>授权证书</b>方可使用：到「<b>授权</b>」页把本机<b>机器码</b>发给发布者，
+            粘贴签发的证书即可激活，之后可离线使用。证书<b>与机器码绑定</b>，仅在本机有效。
           </div>
           <div class="text-caption mt-1">
-            本项目完全免费、无任何收费或推广；若在别处看到有人收费售卖，与本项目无关。
+            本工具应仅用于<b>本人设备与获授权的调试场景</b>，并遵守所在学校的规章制度；
+            许可条件以仓库 <code>LICENSE</code> 文件为准。
           </div>
         </v-alert>
 
