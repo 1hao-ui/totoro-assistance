@@ -4,21 +4,21 @@
  * **为什么之前读不出数据**：端点 `getMornSignArchDetail` 早就登记了，但 wrapper 只传了 `stuNumber`
  * （缺 `termId` 与 `monthId`）⇒ 服务端把它当成"没指定学期/月份"⇒ 回空数组。界面里也没有任何消费者。
  *
- * **权威依据**（厂商小程序 `app-service.js` 的 `getMorningData`）：
- * ```js
- * var t = this.data.morningDate.split("-")[1];   // monthId = 两位月份，如 "09"
- * u.request({ url: "/wxxcx/platform/mornSign/getMornSignArchDetail", method: "POST",
- *   data: { termId: this.data.termId, stuNumber: this.data.userInfo.snCode, monthId: t } })
- * // 返回顶层：scoreList / completedTimes / incompleteTimes / requireNumber / ifDayHasComSign
+ * **接口契约**（按实测请求/响应核对）：
+ * ```text
+ * POST /wxxcx/platform/mornSign/getMornSignArchDetail
+ * body: { termId, stuNumber, monthId }          // monthId = 两位月份，如 "09"
+ * 返回顶层: scoreList / completedTimes / incompleteTimes / requireNumber / ifDayHasComSign
  * ```
- * 注意两点：① 字段名是 **`stuNumber`**（不是 snCode）；② **body 里不带 token**（鉴权走 `Authorization` 头）。
+ * 两个必须遵守的点：① 学号字段名是 **`stuNumber`**（不是 `snCode`）；
+ * ② **body 里不带 token**（鉴权走 `Authorization` 头）。
  *
- * ⚠️ **诚实标注**：`status` 的取值语义（0/1/2 各代表什么）**未在厂商源码里读到明确映射**，
+ * ⚠️ **诚实标注**：`status` 的取值语义（0/1/2 各代表什么）**没有可依据的权威映射**，
  * 这里按"0=未签到、1=已签到、2=已签到（异常/补签）"的**推断**展示，并把原始状态一并显示出来，
- * 免得把推断当事实（真要定论得抓一次真实数据对比）。
+ * 免得把推断当事实（真要定论得抓真实数据对比）。
  */
 
-/** 签到记录接口的请求体（字段名必须与厂商一致：`stuNumber` / `monthId`） */
+/** 签到记录接口的请求体（字段名由接口契约固定：`stuNumber` / `monthId`） */
 export interface MornSignArchParams {
   termId: string
   stuNumber: string
@@ -45,12 +45,12 @@ export interface MornSignArchResult {
   records: MornSignArchRecord[]
 }
 
-/** 当前月份 → 两位字符串（厂商是从 `morningDate.split("-")[1]` 取的） */
+/** 当前月份 → 两位字符串（契约要求 `09` 这种两位形态，`9` 可能被服务端判成非法） */
 export const twoDigitMonth = (d: Date = new Date()): string => String(d.getMonth() + 1).padStart(2, '0')
 
 /**
  * 构造请求体。判据：**`monthId` 必须是两位字符串**（"9" 与 "09" 在服务端可能不是一回事），
- * 且**学号字段名必须是 `stuNumber`**（照厂商源码，别想当然写 snCode）。
+ * 且**学号字段名必须是 `stuNumber`**（接口契约如此，别想当然写成 `snCode`）。
  */
 export function buildMornSignArchParams(input: { snCode: string; termId: string; month: string }): MornSignArchParams {
   const month = String(input.month).trim()

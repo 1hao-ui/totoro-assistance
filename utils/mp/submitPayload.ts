@@ -29,7 +29,7 @@ export interface RealSubmitContext {
   task: MpSunrunTask | null
   /**
    * 选中线路（其 pointId 即 lineId、taskId 即 paperId）。
-   * ⚠️ **自由跑为 `null`**（厂商源码：只有阳光跑才取线路；自由跑 paperId/lineId 都是空串）。
+   * ⚠️ **自由跑为 `null`**（契约：只有阳光跑才取线路；自由跑 paperId/lineId 都是空串）。
    * ⚠️ **服务端未下发线路的任务**（`routeRequirementOf(task).kind === 'free'`）也为 `null` ——
    *    此时任务号由下面的 `paperId` 兜底（见 `buildScoreRequest` 的 taskId 分支）。
    */
@@ -62,13 +62,12 @@ export interface RealSubmitContext {
 }
 
 /**
- * getRunBegin 报文（注意：**不带 token**，照源码）。
+ * getRunBegin 报文（注意：**不带 token** —— 鉴权走 `Authorization` 头）。
  *
- * ⚠️ **自由跑口径**（2026-09-18 从厂商反编译源码读出的权威依据，`_mp-analyze/extracted/app-service.js`）：
- * ```js
- * 2==a.data.runType && (i=1),                        // 2(自由跑) → 提交 runType=1
- * 0==a.data.runType && (o=a.data.columnsLine[...]),  // 只有 0(阳光跑) 才取线路
- * r={runType:i, ..., paperId:o.taskId||"", lineId:o.pointId||""}
+ * ⚠️ **自由跑口径**（按实测报文核对确认）：
+ * ```text
+ * 阳光跑(runType=0): runType=0，paperId/lineId 取自所选线路的 taskId/pointId
+ * 自由跑(runType=1): runType=1，且 paperId/lineId **都是空串**（不取线路）
  * ```
  * 即：**自由跑传 `runType:1`，且 `paperId`/`lineId` 都是空串**（不去取线路）。
  * 传 `line` 时按阳光跑口径取该线路的 taskId/pointId；**`line` 可为空**（自由跑）。

@@ -2,7 +2,7 @@
  * 【演示态 + 跑步机】跑步引擎：`useDemoRunner()`（计时 / 轨迹 / 拟合度 / 结算）
  *
  * 跑步过程是**真实计算**的：轨迹由 `generateCorridorRoute` 生成、拟合度由
- * `calculateRouteSimilarity` 计算、里程/配速/自洽校验由 `buildRunStats` 产出 —— 只是
+ * `computeFitDegree` 计算、里程/配速/自洽校验由 `buildRunStats` 产出 —— 只是
  * 位置推进用「模拟倍速」代替真实 GPS，因此可以在几十秒内跑完 3km。
  * 真实提交（`sunRunExercises` 等）在 `composables/useMpReal.ts`，本文件的 `finish()` 只生成本地报文预览。
  *
@@ -10,7 +10,7 @@
  * `demo/records.ts` 的返回值传入；依赖方向：本文件 → {`./state`, `./records`}（单向，**不反向**）。
  * ⚠️ 传进来的 ref 与 `useState` 拿到的是同一个对象，所以 `run.value = ...` 这类赋值照旧对全局生效。
  */
-import { calculateRouteSimilarity } from '~/utils/mp/routeSimilarity'
+import { computeFitDegree } from '~/utils/mp/routeSimilarity'
 import type { LatLng } from '~/utils/mp/routeSimilarity'
 import { generateCorridorRoute } from '~/utils/mp/generateRoute'
 import { applyStartToLoop, laneLoop, laneRatioFor } from '~/utils/mp/trackEditor'
@@ -46,7 +46,7 @@ let lastFitAt = 0
  *   ① 这只是**本地几何**：这些 `pointId` 是我们自己描述的路线库键名（多半来自别的任务/线路），
  *      **不是服务端线路标识** ⇒ 绝不允许进提交报文（`lineId` 必须空串，任务号走 `paperId` 兜底）；
  *   ② `pointList: []` —— 本任务**没有官方模板点列**，如实留空（不拿本机坐标冒充服务端线路）；
- *      连带影响：拟合度没有参照线可算（`calculateRouteSimilarity([], …) === 0`），
+ *      连带影响：拟合度没有参照线可算（`computeFitDegree([], …) === 0`），
  *      所以自检里的拟合度一行会显示成"提示"（服务端未下发阈值，`taskRules.ts`）；
  *   ③ 一条都没描 ⇒ 返回空数组，照旧报"还没描过跑道"（我们总得有个几何才能生成轨迹）。
  */
@@ -136,7 +136,7 @@ export function useDemoRunner(state: DemoStateApi, recordsApi: DemoRecordsApi) {
       run.value.fitDegree = 0
       return
     }
-    run.value.fitDegree = calculateRouteSimilarity(run.value.officialRoute, points)
+    run.value.fitDegree = computeFitDegree(run.value.officialRoute, points)
   }
 
   const syncProgress = () => {
@@ -357,7 +357,7 @@ export function useDemoRunner(state: DemoStateApi, recordsApi: DemoRecordsApi) {
     const durationSeconds = Math.max(1, Math.round(distanceKm * run.value.paceSecPerKm))
     run.value.elapsedS = durationSeconds
     const points = visiblePoints()
-    const fitDegree = points.length >= 2 ? calculateRouteSimilarity(run.value.officialRoute, points) : 0
+    const fitDegree = points.length >= 2 ? computeFitDegree(run.value.officialRoute, points) : 0
 
     const submitRunType = toSubmitRunType(run.value.runType === 0 ? 0 : 2)
     const stats = buildRunStats({ distanceKm, durationSeconds, runType: submitRunType })

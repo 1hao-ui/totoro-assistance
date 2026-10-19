@@ -18,7 +18,7 @@
 import type { MpMornSignPoint, MpMornSignTask } from '~/src/mp/types'
 import { sampleZoneCoord, type MornSignZone } from './mornSignZone'
 
-/** 提交载荷（16 字段，逐字段对齐厂商真包口径） */
+/** 提交载荷（16 字段，字段形状由接口契约固定） */
 export interface MornSignSubmitPayload {
   taskId: string
   iLocalSubmit: '0'

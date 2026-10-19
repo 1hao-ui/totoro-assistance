@@ -11,7 +11,7 @@
  *   - 真实链路进入时请调用 `disableDemo()`。
  *
  * 跑步过程是**真实计算**的：轨迹由 `generateCorridorRoute` 生成、拟合度由
- * `calculateRouteSimilarity` 计算、里程/配速/自洽校验由 `buildRunStats` 产出 —— 只是
+ * `computeFitDegree` 计算、里程/配速/自洽校验由 `buildRunStats` 产出 —— 只是
  * 位置推进用「模拟倍速」代替真实 GPS，因此可以在几十秒内跑完 3km。
  * 真实提交（`sunRunExercises` 等）在 `composables/useMpReal.ts`，本文件的 `finish()` 只生成本地报文预览。
  * （本次结构整理后 `finish()` 已搬到 `demo/runner.ts`，语义不变。）

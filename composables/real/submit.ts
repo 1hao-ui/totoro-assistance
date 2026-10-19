@@ -275,7 +275,7 @@ export function useMpRealSubmit() {
 
     const options = { token, baseUrl: session.value?.baseUrl }
 
-    // ① 开跑：getRunBegin（写）。自由跑照厂商口径传 runType=1 且 paperId/lineId 为空串；
+    // ① 开跑：getRunBegin（写）。自由跑传 runType=1 且 paperId/lineId 为空串（按实测行为确认）；
     //    **服务端未下发线路的任务**：paperId 用任务号兜底、lineId 为空串（本机跑道 id 不是服务端线路，绝不进报文）。
     phase.value = 'begin'
     phaseMessage.value = '正在创建跑步会话（getRunBegin）…'
