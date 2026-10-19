@@ -1,0 +1,39 @@
+name: Build Windows exe
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Nuxt (production)
+        run: npm run build
+
+      - name: Run electron-builder
+        run: npx electron-builder --win nsis --x64
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: totoro-windows-exe
+          path: |
+            dist/*.exe
+            dist/*.zip
+            dist/win-unpacked/**
