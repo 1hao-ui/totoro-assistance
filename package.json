@@ -4,6 +4,7 @@
   "description": "Totoro Paradise —— 阳光跑助手（微信小程序后端线）",
   "private": true,
   "type": "module",
+  "main": "electron-main.cjs",
   "scripts": {
     "dev": "nuxt dev",
     "build": "nuxt build",
@@ -16,7 +17,10 @@
     "check:wiring": "node scripts/check-wiring.mjs",
     "selftest:wiring": "node scripts/selftest-check-wiring.mjs",
     "verify": "npm run test:mp && npm run typecheck:mp && npm run typecheck:ui && npm run typecheck:vue && npm run check:wiring && npm run selftest:wiring",
-    "sea": "powershell -NoProfile -ExecutionPolicy Bypass -File pack/sea/build-sea.ps1"
+    "sea": "powershell -NoProfile -ExecutionPolicy Bypass -File pack/sea/build-sea.ps1",
+    "electron:build:web": "npm run build",
+    "electron:start": "cross-env NODE_ENV=production electron .",
+    "electron:build": "npm run electron:build:web && npx electron-builder --win nsis --x64"
   },
   "dependencies": {
     "ky": "^1.2.3",
@@ -26,7 +30,7 @@
   },
   "devDependencies": {
     "@mdi/font": "^7.4.47",
-    "@types/node": "^20.11.30",
+    "@types-node": "^20.11.30",
     "esbuild": "^0.28.2",
     "nuxi": "^3.10.0",
     "postject": "^1.0.0-alpha.6",
@@ -36,6 +40,38 @@
     "tar": "^7.5.22",
     "typescript": "^5.4.5",
     "vue-tsc": "^2.0.29",
-    "vuetify": "^3.5.15"
+    "vuetify": "^3.5.15",
+    "electron": "^26.2.0",
+    "electron-builder": "^24.7.0",
+    "concurrently": "^8.2.0",
+    "wait-on": "^7.0.1",
+    "cross-env": "^7.0.3"
+  },
+  "build": {
+    "appId": "com.1hao.totoro",
+    "productName": "TotoroHeaven",
+    "files": [
+      ".output/**/*",
+      "electron-main.cjs",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "directories": {
+      "buildResources": "build"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "createDesktopShortcut": true
+    }
   }
 }
