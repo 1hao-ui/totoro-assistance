@@ -32,6 +32,19 @@
       <v-btn to="/credits" variant="text" prepend-icon="mdi-heart-outline" class="text-none">鸣谢</v-btn>
       <v-spacer />
 
+      <!-- 授权状态（2026-10-19）：与「授权」页、全局路由守卫同源（useLicenseState）。
+           未授权时可点击直达授权页；宽限期/即将到期用 warning 色提醒。 -->
+      <v-chip
+        :color="licenseUi.chip.color"
+        variant="tonal"
+        size="small"
+        class="mr-2"
+        :prepend-icon="licenseUi.chip.icon"
+        :to="licenseUi.mustActivate ? '/license' : undefined"
+      >
+        {{ licenseUi.chip.text }}
+      </v-chip>
+
       <v-chip :color="isRealSession ? 'success' : 'default'" variant="tonal" size="small" class="mr-2">
         <v-icon start size="16">{{ isRealSession ? 'mdi-cellphone-link' : 'mdi-information-outline' }}</v-icon>
         {{ isRealSession ? '真实数据' : '未连接' }}
@@ -85,4 +98,13 @@ const doLogout = () => {
 }
 
 const aboutOpen = ref(false)
+
+/**
+ * 顶栏授权状态 chip 的数据源（与「授权」页、路由守卫同一份缓存）。
+ * `ensureLoaded()` 通常已由全局路由守卫在首次导航时读过 ⇒ 这里只是兜底；缓存命中时零开销。
+ */
+const { ui: licenseUi, ensureLoaded } = useLicenseState()
+onMounted(() => {
+  void ensureLoaded()
+})
 </script>

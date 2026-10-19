@@ -1,5 +1,25 @@
 <template>
   <div>
+    <!-- 被全局路由守卫拦到这里的说明（`?need=1`）：用户本来想进别的页，被送到这里，
+         不解释一句会让人莫名其妙 -->
+    <v-alert v-if="blockedHere" type="warning" variant="tonal" density="comfortable" class="mb-4">
+      <div class="font-weight-bold">
+        <v-icon class="mr-1">mdi-lock-alert</v-icon>需要先完成激活
+      </div>
+      <div class="text-body-2">
+        本程序需发布者签发的<b>授权证书</b>才能使用。请把下面的<b>本机机器码</b>发给发布者，
+        拿到证书后粘贴激活即可 —— 激活后各功能页会自动恢复可用。
+      </div>
+    </v-alert>
+
+    <!-- 由服务端状态推导的横幅（即将到期 / 宽限期 / 已过期）；与顶栏 chip 同源 -->
+    <v-alert v-if="policyBanner" :type="policyBanner.type" variant="tonal" density="comfortable" class="mb-4">
+      <div class="font-weight-bold">
+        <v-icon class="mr-1">mdi-alert-circle-outline</v-icon>{{ policyBanner.title }}
+      </div>
+      <div class="text-body-2">{{ policyBanner.text }}</div>
+    </v-alert>
+
     <!-- 开发模式提示：dev 下不校验（生产构建会强制） -->
     <v-alert v-if="status.devBypass" type="info" variant="tonal" density="comfortable" class="mb-4">
       <div class="font-weight-bold">
@@ -55,6 +75,7 @@
             <tr><td class="text-medium-emphasis" style="width: 140px">授权对象</td><td>{{ textOr(status.subject) }}</td></tr>
             <tr><td class="text-medium-emphasis">许可证编号</td><td>{{ textOr(status.licenseId) }}</td></tr>
             <tr><td class="text-medium-emphasis">功能位</td><td>{{ status.features.length ? status.features.join('、') : '—' }}</td></tr>
+            <tr><td class="text-medium-emphasis">剩余</td><td>{{ daysLeftText }}</td></tr>
             <tr><td class="text-medium-emphasis">正常到期</td><td>{{ fmtTime(status.expiresAt) }}</td></tr>
             <tr><td class="text-medium-emphasis">离线宽限至</td><td>{{ fmtTime(status.graceUntil) }}（超过它一律拒绝）</td></tr>
             <tr><td class="text-medium-emphasis">激活时间</td><td>{{ textOr(status.activatedAt) }}</td></tr>
@@ -63,6 +84,9 @@
 
         <div class="d-flex flex-wrap ga-2 mt-4">
           <v-btn variant="tonal" size="small" prepend-icon="mdi-refresh" :loading="loading" @click="refresh">刷新状态</v-btn>
+          <v-btn v-if="status.licensed" variant="tonal" size="small" color="primary" prepend-icon="mdi-home-outline" to="/">
+            去工作台
+          </v-btn>
           <v-btn
             v-if="status.licensed"
             variant="tonal"
@@ -151,72 +175,38 @@
 
 <script setup lang="ts">
 /**
- * 「授权」页（2026-10-16 新增）—— 展示本机机器码 + 录入/解除授权证书。
+ * 「授权」页 —— 展示本机机器码 + 录入/解除授权证书 + 状态提示。
  *
- * ## ⚠️ DTO 为什么在页面里**内联声明**，而不是从 `server/` import
- * 仓库的分层规则（`scripts/check-wiring.mjs` 的 R6-L6）明确禁止前端直接 import `server/**`：
- * 前端只能通过接口（`/api/**`）拿数据。所以这里按仓库既有做法（如 `pages/index.vue` 对
- * `/api/local/token-scan/start` 的写法）**内联声明返回结构**。
- *
- * ## 为什么状态用**非空默认值**而不是 `ref<Status | null>(null)`
- * 仓库的 R7 守卫会扫描页面模板：`| null` 的可空状态若在模板里裸取（`status.foo`）就会报违规。
- * 用"带默认值的完整对象"既避开这条守卫，也让模板不必到处写 `?.`（更不容易漏）。
+ * ## 状态从哪来
+ * 统一走 `composables/useLicenseState.ts`（与**路由守卫、顶栏状态 chip 共用同一份缓存**）。
+ * 页面不再自己维护一份 DTO —— 三处各存一份，迟早会出现"顶栏说已授权、页面还在拦"的自相矛盾。
  *
  * ## 本页**不做任何业务判断**
  * "能不能用"由服务端中间件决定（`server/middleware/license.ts`）。本页只负责展示与录入 ——
  * 前端说了不算，改前端也绕不过去（这正是闸门放在服务端的意义）。
+ *
+ * ## 为什么状态用**非空默认值**
+ * `emptyLicenseStatus()` 字段齐全，`ui` 由纯函数推导恒为完整对象 ⇒ 模板不必到处写 `?.`
+ * （也避开了仓库 R7 守卫对可空状态的检查）。
  */
+import { useLicenseState } from '~/composables/useLicenseState'
 import { useNotice } from '~/composables/useNotice'
+import type { LicenseStatusView } from '~/utils/mp/licensePolicy'
 
-/** `/api/local/license/status` 的返回结构（与 `server/utils/license/state.ts` 的 `LicenseStatus` 对应） */
-interface LicenseStatusDto {
-  licensed: boolean
-  code: string
-  degraded: boolean
-  message: string
-  machineCode: string
-  machineCodeStable: boolean
-  publicKeyConfigured: boolean
-  devBypass: boolean
-  enforced: boolean
-  subject: string
-  licenseId: string
-  features: string[]
-  issuedAt: number
-  expiresAt: number
-  graceUntil: number
-  activatedAt: string
-  dir: string
-}
-
+const route = useRoute()
 const showSnackbar = useNotice()
 
-/** 首屏默认值：字段齐全，避免模板里出现 `undefined.xxx` */
-const emptyStatus = (): LicenseStatusDto => ({
-  licensed: false,
-  code: 'not_activated',
-  degraded: false,
-  message: '正在读取授权状态…',
-  machineCode: '',
-  machineCodeStable: true,
-  publicKeyConfigured: true,
-  devBypass: false,
-  enforced: true,
-  subject: '',
-  licenseId: '',
-  features: [],
-  issuedAt: 0,
-  expiresAt: 0,
-  graceUntil: 0,
-  activatedAt: '',
-  dir: '',
-})
+const { status, ui, loading, refresh: refreshState, applyStatus } = useLicenseState()
 
-const status = ref<LicenseStatusDto>(emptyStatus())
 const certificate = ref('')
-const loading = ref(true)
 const busy = ref(false)
 const errorText = ref('')
+
+/** 是否是从别的页面被路由守卫拦过来的（`?need=1`） */
+const blockedHere = computed(() => route.query.need === '1')
+
+/** 除"开发模式"以外的横幅（开发模式在本页有自己更详细的专用提示，不重复显示） */
+const policyBanner = computed(() => (ui.value.kind === 'dev' ? null : ui.value.banner))
 
 /** 空值统一显示为短横线（避免表格里出现空白单元格，看起来像没加载出来） */
 const textOr = (s: string): string => (s && s.trim() ? s : '—')
@@ -225,19 +215,21 @@ const textOr = (s: string): string => (s && s.trim() ? s : '—')
 const fmtTime = (sec: number): string =>
   sec > 0 ? new Date(sec * 1000).toLocaleString('zh-CN', { hour12: false }) : '—'
 
-/** 读状态（强制服务端重算：本接口只在进页面/点刷新时调用，代价可忽略） */
+/** 强制重读（缓存与错误处理都在 `useLicenseState()` 里，这里只管页面提示） */
 const refresh = async (): Promise<void> => {
-  loading.value = true
-  try {
-    const res = await $fetch<{ ok: boolean; status: LicenseStatusDto }>('/api/local/license/status')
-    status.value = res.status
-    errorText.value = ''
-  } catch (e) {
-    errorText.value = `读取授权状态失败：${e instanceof Error ? e.message : String(e)}`
-  } finally {
-    loading.value = false
-  }
+  errorText.value = ''
+  const ok = await refreshState()
+  if (!ok) errorText.value = '读取授权状态失败，请稍后重试'
 }
+
+/** 剩余天数文案（null = 无期限；负数 = 已过期） */
+const daysLeftText = computed((): string => {
+  const n = ui.value.daysLeft
+  if (n === null) return '—'
+  if (n < 0) return `已过期 ${-n} 天`
+  if (n === 0) return '今天到期'
+  return `${n} 天`
+})
 
 const copyMachineCode = async (): Promise<void> => {
   if (!status.value.machineCode) {
@@ -261,11 +253,11 @@ const doActivate = async (): Promise<void> => {
   }
   busy.value = true
   try {
-    const res = await $fetch<{ ok: boolean; error: string; status: LicenseStatusDto }>('/api/local/license/activate', {
+    const res = await $fetch<{ ok: boolean; error: string; status: LicenseStatusView }>('/api/local/license/activate', {
       method: 'POST',
       body: { certificate: certificate.value },
     })
-    status.value = res.status
+    applyStatus(res.status)
     if (res.ok) {
       errorText.value = ''
       certificate.value = ''
@@ -283,8 +275,8 @@ const doActivate = async (): Promise<void> => {
 const doDeactivate = async (): Promise<void> => {
   busy.value = true
   try {
-    const res = await $fetch<{ ok: boolean; status: LicenseStatusDto }>('/api/local/license/deactivate', { method: 'POST' })
-    status.value = res.status
+    const res = await $fetch<{ ok: boolean; status: LicenseStatusView }>('/api/local/license/deactivate', { method: 'POST' })
+    applyStatus(res.status)
     errorText.value = ''
     showSnackbar('已解除本机授权（如需再次使用请重新激活）', 'info')
   } catch (e) {
