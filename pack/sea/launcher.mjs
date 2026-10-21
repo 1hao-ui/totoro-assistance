@@ -227,15 +227,23 @@ const CLR = {
   dim: esc(2),
 }
 
-/* ===== 终端横幅：简洁两行信息盒（2026-10-20 用户要求去掉品牌 ASCII 艺术字）===== */
-// 说明：原来这里是一段 FIGlet slant 的 "TOTORO HEAVEN" 艺术字，用户明确不想要，
-// 已整块删除；其余（装饰斜线、信息盒、自动开浏览器提示）保持原样，功能一律未动。
+/* ===== 终端横幅 =====
+ * 2026-10-20：用户不想要 FIGlet 的 "TOTORO HEAVEN"，已删除。
+ * 2026-10-21：用户希望横幅上写「龙猫破解」。实测**汉字做不了好看的像素艺术字**：
+ *   笔画密度太高，无论 4 种字号还是「大图降采样 / 直接按目标分辨率渲染」两种算法，
+ *   转成半块字符（█▀▄）后都是一团黑块（已生成对比图验证）。
+ *   所以这里改用终端里最耐看的「大字距 + 加粗高亮 + 双线框」来做标题文字。
+ *   想换回英文艺术字（例如 LONGMAO）随时可以加，图标/功能都不受影响。
+ */
 
-// 文本显示宽度：全角（CJK）字符计 2 列，其它（含 ANSI 码剔除后）计 1 列
+// 文本显示宽度：全角（CJK）字符计 2 列；制表/方块类字符（─│┌┐▀█ 等）在终端里是 1 列
+// ⚠️ 2026-10-21 修正：原先 0x2500–0x25FF 的框线/方块被误判为 2 列，导致整块横幅左偏（一直没居中）。
 const displayWidth = (s) => {
   let w = 0
   for (const ch of s) {
-    w += (ch.codePointAt(0) > 0x1fff) ? 2 : 1
+    const c = ch.codePointAt(0)
+    if (c >= 0x2500 && c <= 0x25ff) { w += 1; continue }
+    w += (c > 0x1fff) ? 2 : 1
   }
   return w
 }
@@ -276,16 +284,18 @@ function buildBanner() {
   const boxTop = '┌' + '─'.repeat(boxW - 2) + '┐'
   const boxBot = '└' + '─'.repeat(boxW - 2) + '┘'
 
-  // 盒子内两行：标题行（含版本）+ 副标题行，分别按盒子内宽居中
-  // （2026-10-20：去掉品牌名 "Totoro Heaven · 龙猫天堂"，只留产品功能描述）
+  // 盒子内三行：大标题（龙猫破解）→ 产品名 + 版本 → 功能说明，各自按盒子内宽居中
   const innerW = boxW - 2
-  const title = `  阳光跑助手  v${APP_VERSION}`
+  const bigTitle = `龙  猫  破  解`
+  const title = `阳光跑助手  v${APP_VERSION}`
   const subtitle = `本地 Web 服务 · 浏览器自动打开`
+  const boxBig = '│' + padTo(bigTitle, innerW) + '│'
   const boxTitle = '│' + padTo(title, innerW) + '│'
   const boxSub = '│' + padTo(subtitle, innerW) + '│'
   push(CLR.dim + boxTop + CLR.reset, boxTop)
-  push(CLR.dim + boxTitle + CLR.reset, boxTitle)
-  push(CLR.bold + CLR.magenta + boxSub + CLR.reset, boxSub)
+  push(CLR.bold + CLR.cyan + boxBig + CLR.reset, boxBig)
+  push(CLR.bold + boxTitle + CLR.reset, boxTitle)
+  push(CLR.magenta + boxSub + CLR.reset, boxSub)
   push(CLR.dim + boxBot + CLR.reset, boxBot)
   push(CLR.cyan + slashBot + CLR.reset, slashBot)
   push('', '')
