@@ -227,15 +227,9 @@ const CLR = {
   dim: esc(2),
 }
 
-/* ===== 终端横幅：FIGlet slant 字体艺术字 + 科技风配色 ===== */
-// FIGlet slant 渲染的 "TOTORO HEAVEN"（npx figlet -f slant 生成）
-const TITLE_LINES = [
-  '  __________  __________  ____  ____     __  ___________ _    _________   __',
-  ' /_  __/ __ \\/_  __/ __ \\/ __ \\/ __ \\   / / / / ____/   | |  / / ____/ | / /',
-  '  / / / / / / / / / / / / /_/ / / / /  / /_/ / __/ / /| | | / / __/ /  |/ /',
-  ' / / / /_/ / / / / /_/ / _, _/ /_/ /  / __  / /___/ ___ | |/ / /___/ /|  /',
-  '/_/  \\____/ /_/  \\____/_/ |_|\\____/  /_/ /_/_____/_/  |_|___/_____/_/ |_/',
-]
+/* ===== 终端横幅：简洁两行信息盒（2026-10-20 用户要求去掉品牌 ASCII 艺术字）===== */
+// 说明：原来这里是一段 FIGlet slant 的 "TOTORO HEAVEN" 艺术字，用户明确不想要，
+// 已整块删除；其余（装饰斜线、信息盒、自动开浏览器提示）保持原样，功能一律未动。
 
 // 文本显示宽度：全角（CJK）字符计 2 列，其它（含 ANSI 码剔除后）计 1 列
 const displayWidth = (s) => {
@@ -271,7 +265,6 @@ function terminalCols() {
 }
 
 function buildBanner() {
-  const it = CLR.bold + CLR.italic
   const plainLines = []
   const styledLines = []
   const push = (styled, plain) => { styledLines.push(styled); plainLines.push(plain) }
@@ -279,17 +272,15 @@ function buildBanner() {
   const slashTop = '  ' + '\\/\\/'.repeat(20)
   const slashBot = '  ' + '/\\/\\'.repeat(20)
   push(CLR.cyan + slashTop + CLR.reset, slashTop)
-  for (const line of TITLE_LINES) {
-    push(it + CLR.cyan + line + CLR.reset, line)
-  }
   const boxW = 74
   const boxTop = '┌' + '─'.repeat(boxW - 2) + '┐'
   const boxBot = '└' + '─'.repeat(boxW - 2) + '┘'
 
   // 盒子内两行：标题行（含版本）+ 副标题行，分别按盒子内宽居中
+  // （2026-10-20：去掉品牌名 "Totoro Heaven · 龙猫天堂"，只留产品功能描述）
   const innerW = boxW - 2
-  const title = `  Totoro Heaven · 龙猫天堂  v${APP_VERSION}`
-  const subtitle = `阳光跑助手 · 本地 Web 服务`
+  const title = `  阳光跑助手  v${APP_VERSION}`
+  const subtitle = `本地 Web 服务 · 浏览器自动打开`
   const boxTitle = '│' + padTo(title, innerW) + '│'
   const boxSub = '│' + padTo(subtitle, innerW) + '│'
   push(CLR.dim + boxTop + CLR.reset, boxTop)
